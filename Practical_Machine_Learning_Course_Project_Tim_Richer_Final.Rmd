@@ -1,0 +1,146 @@
+---
+title: 'Exercise Accelerometer Analysis: Predicting exercise manner'
+output:
+  html_document:
+    keep_md: yes
+  pdf_document: default
+  word_document: default
+---
+### Analysis by Tim Richer
+######(for Practical Machine Learning Course Project)
+### Executive Summary
+####Devices collect a large amount of data about personal activity. Using accelerometer data collected, while the user is engaged in a particular activity, it is possible to quantify how well they do the activity.  Using data, collected from the accelerometers on the belt, forearm, arm, and dumbell of 6 participants, we can predict the manner in which they did the exercise.
+* Activity "classe": 
+    + Class A:exactly according to the specification 
+    + Class B:throwing the elbows to the front 
+    + Class C:lifting the dumbbell only halfway 
+    + Class D:lowering the dumbbell only halfway 
+    + Class E:throwing the hips to the front
+
+####  Applying machine learning algorithms we are able to determine a model which had the highest accuracy and lowest error rate.  Boosting and Random Forests are the most common tools in prediction contests so those models were evaluated first.  The focus of the model selection was accuracy.  Random Forest offered greater accuracy so that model was selected.  The analysis describes how the model was built, the use of cross validation, and the expected in-sample and out-of-sample errors.  The Random Forest model led to the greatest accuracy, with an in-sample accuracy of 100% and an out-of-sample accuracy of 99.16%.  The model was then used to predict 20 different test cases.    When the model was used with the Validation dataset it resulted in the following 'classe' predicitons for the 20 datasets:"B" "A" "B" "A" "A" "E" "D" "B" "A" "A" "B" "C" "B" "A" "E" "E" "A" "B" "B" "B".
+
+### Exploring and Cleaning the data
+
+####An initial review of that datasets indicated a high occurence of columns with no data.  If more than half of the observations for a column were NA then the column was excluded.  This eliminated 100 predictors.  The corresponding columns were then removed from the validation dataset as well.
+
+```{r, echo = FALSE, warning=FALSE}
+rm(list = ls())
+setwd("C:/Users/TimRicher/Desktop/PML/MyProject")
+suppressMessages(library(knitr))
+suppressMessages(library(lattice))
+suppressMessages(library(ggplot2))
+suppressMessages(library(caret))
+suppressMessages(library(survival))
+suppressMessages(library(splines))
+suppressMessages(library(parallel))
+suppressMessages(library(plyr))
+suppressMessages(library(gbm))
+suppressMessages(library(randomForest))
+```
+
+```{r, eval=FALSE}
+#Load the required libraries
+library(knitr)
+library(lattice)
+library(ggplot2)
+library(caret)
+library(survival)
+library(splines)
+library(parallel)
+library(plyr)
+library(gbm)
+library(randomForest)
+```
+
+```{r}
+#Download the exercise datasets.
+pml_training_URL <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+pml_testing_URL <-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+download.file(pml_training_URL, "pml-training.csv")
+download.file(pml_testing_URL, "pml-testing.csv")
+
+# load the training and testing datasets
+training_file <- read.csv("pml-training.csv", header = TRUE, na.strings= c("", "NA"))
+validation_file <- read.csv("pml-testing.csv", header = TRUE, na.strings= c("", "NA"))
+
+#If the number of NA values exceeds 50% exclude the column
+total_column_count <- ncol(training_file)
+empty_columns <- (colSums(is.na(training_file)) > (nrow(training_file)/2))
+empty_column_count = ncol(training_file[empty_columns])
+
+print(paste0("Total columns (initially): ", total_column_count))
+print(paste0("Empty columns: ", empty_column_count))
+
+#Get rid of the empty columns in the dataset.
+training_data <- training_file[!empty_columns]
+validation_data <- validation_file[!empty_columns]
+```
+####Of the remaining columns, the next step was to eliminate predictors not related to the accelerometer.  Using like data to predict like led to removal of 7 additional columns of unrelated data: an index, user_name, 3 timestamps, and 2 window observations. This left 52 accelerometer predictors, and the variable, classe, which we are trying to predict.
+```{r}
+#Get rid of columns not related to accelerometer data.
+non_accelerometer_data <- c(1:7)
+training_data <- training_data[, -non_accelerometer_data]
+validation_data <- validation_data[, -non_accelerometer_data]
+```
+####With the data cleaned up, we can explore the predictors.  As we can see in the summary and frequency plot, Class A has the highest frequency, followed by the rest which all have similar frequencies
+```{r}
+summary(training_data$classe)
+```
+
+Figure 1
+```{r, echo = FALSE}
+plot(training_data$classe, main = "Exercise manner frequency plot", xlab = "Exercise Classe")
+```
+
+###Analysis:
+#### Model Selection: With a focus on accuracy, Random Forest and Boosting models were created to determine a model selection.  The training dataset was partitioned into a 60% training and a 40% testing split, and we also have a validation dataset for the prediction test.  Cross Validation was used, 3 fold, a smaller k was used so there would be less variance.   This split the training dataset into 3-subsets. Each subset is held out while the model is trained on all other subsets. This process is completed until accuracy is determined for each instance in the dataset, and an overall accuracy estimate is provided.  The accuracy for Random Forest was 98.6%.  The accuracy for Boosting was 95.8%.  Random Forest will be used for prediction because of it's higher accuracy.
+```{r}
+set.seed(998)
+inTrain <- createDataPartition(y=training_data$classe, p=0.6, list=FALSE)
+trainingdata <- training_data[inTrain,]
+testingdata <- training_data[-inTrain,]
+
+rf_model <- train(trainingdata$classe ~ ., data = trainingdata, method = "rf", prox = TRUE, trControl = trainControl(method = "cv", number =3, allowParallel = TRUE))
+
+print(rf_model)
+
+boosting_model <- train(trainingdata$classe ~ ., data = trainingdata, method = "gbm", verbose = FALSE, trControl=trainControl(method="cv", number =3, allowParallel = TRUE))
+
+print(boosting_model)
+```
+### Prediction:
+####In-sample accuracy, from the training dataset:  The accuracy for Random Forest was 100%.
+```{r}
+training_prediction <- predict(rf_model, trainingdata)
+confusionMatrix(training_prediction, trainingdata$classe)
+```
+
+####Out-of-sample accuracy, from the testing dataset:  The accuracy for Random Forest was 99.16%
+```{r}
+testing_prediction <- predict(rf_model, testingdata)
+confusionMatrix(testing_prediction, testingdata$classe)
+```
+
+### Prediction Assignment:  
+####The predicition assignment was performed on the validation dataset.  The problem_id column was excluded since it was not relevant to the prediction.  It resulted in the following classe predicitons for the 20 datasets:"B" "A" "B" "A" "A" "E" "D" "B" "A" "A" "B" "C" "B" "A" "E" "E" "A" "B" "B" "B"
+```{r, echo=FALSE}
+library(utils)
+```
+
+```{r}
+#The Validation_file has the problem_id column, need to exclude.
+validation_data_trim <- validation_data[,-53]
+validation_prediction <- predict(rf_model, validation_data_trim)
+
+validation_results <- as.character(validation_prediction)
+validation_results
+
+#Write out the answers:
+for (i in 1:length(validation_data[,53])){
+  quiz_file = paste("problem_id_", i, ".txt")
+  write.table(validation_results[i], file=quiz_file, quote=FALSE, row.names=FALSE, col.names=FALSE)
+}
+```
+
+###Conclusions
+####In conclusion, the random forest machine learning model provided excellent accuracy and out-of-sample performance.  We used 3-fold cross validation, for greater robustness, which resulted in a 100% in-sample accuracy and a 99.16% out-of-sample accuracy.
